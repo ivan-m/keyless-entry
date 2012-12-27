@@ -1,0 +1,24 @@
+name:                keyless-entry
+version:             0.1.0.0
+synopsis:            Lookup-tables with auto-generated keys
+-- description:
+license:             BSD3
+license-file:        LICENSE
+author:              Ivan Lazar Miljenovic
+maintainer:          Ivan.Miljenovic@gmail.com
+-- copyright:
+category:            Data
+build-type:          Simple
+cabal-version:       >=1.8
+
+library
+  exposed-modules:       Data.Keyless
+                       , Data.Keyless.Vector.Mutable
+                       , Data.Keyless.Map.Lazy
+                       , Data.Keyless.IntMap.Lazy
+  -- other-modules:
+  build-depends:         base >=4.6 && < 5,
+                       , vector ==0.10.*
+                       , monad-prim ==0.1.*
+                       , primitive ==0.5.*
+                       , containers >=0.5 && < 6

@@ -1,0 +1,122 @@
+{-# LANGUAGE FlexibleContexts, TypeFamilies #-}
+{- |
+   Module      : Data.Keyless
+   Description : Class of lookup tables with generated keys.
+   Copyright   : (c) Ivan Lazar Miljenovic
+   License     : 3-Clause BSD-style
+   Maintainer  : Ivan.Miljenovic@gmail.com
+
+This module defines a class for when you want to store data in a
+lookup table/dictionary but the type/value of the key isn't important.
+
+-}
+module Data.Keyless where
+
+import Prelude hiding (lookup, map)
+import Data.Maybe(isJust, fromMaybe)
+import Control.Monad(liftM)
+
+-- -----------------------------------------------------------------------------
+
+-- | The keys of the values in the 'Keyless' tables.  Note that all
+--   keys will be @>= 0@ and no key will be repeated (even if the
+--   value corresponding to the maximal key is deleted and then a new
+--   value is added, a new higher key will be returned).
+type Key = Int
+
+-- | The minimum key used.
+initKey :: Key
+initKey = 0
+
+class (Monad (KMonad c)) => Keyless c where
+
+  type KMonad c :: * -> *
+
+  -- | A blank lookup table.
+  empty :: (KMonad c) (c a)
+
+  -- | Insert the provided value into the table
+  insert :: a -> c a -> (KMonad c) (Key, c a)
+
+  -- | Remove the specified entry from the table.  Won't do anything
+  --   if the key is not in the table.
+  delete :: Key -> c a -> (KMonad c) (c a)
+
+  -- | Return the value associated with the specified key if it is in
+  --   the table.
+  lookup :: Key -> c a -> (KMonad c) (Maybe a)
+
+  -- | As with 'lookup', but assumes the key is in the table.
+  unsafeLookup   :: Key -> c a -> (KMonad c) a
+  unsafeLookup k = liftM (fromMaybe err) . lookup k
+    where
+      err = error $ "The key `" ++ show k ++ "' does not have a corresponding value."
+
+  -- | Is the following entry in the table?
+  hasEntry   :: Key -> c a -> (KMonad c) Bool
+  hasEntry k = liftM isJust . lookup k
+
+  -- | Apply a function on the value associated with the specified key.
+  adjust :: (a -> a) -> Key -> c a -> (KMonad c) (c a)
+
+  -- | How many values are currently stored.
+  size :: c a -> (KMonad c) Int
+  size = liftM length . keys
+
+  -- | The smallest key being used; 'Nothing' indicates 'isNull'.
+  minKey :: c a -> (KMonad c) (Maybe Key)
+
+  -- | The largest key being used; 'Nothing' indicates 'isNull'.  Note
+  --   that the next key will /not/ necessarily be @(+1)@ of this.
+  maxKey :: c a -> (KMonad c) (Maybe Key)
+
+  -- | Are there any values being stored?
+  isNull :: c a -> (KMonad c) Bool
+  isNull = liftM (0==) . size
+
+  -- | Return all keys in the table.
+  keys :: c a -> (KMonad c) [Key]
+  keys = liftM (fmap fst) . assocs
+
+  -- | Return all values in the table.
+  values :: c a -> (KMonad c) [a]
+  values = liftM (fmap snd) . assocs
+
+  -- | Return all @(key,value)@ pairs in the table.
+  assocs :: c a -> (KMonad c) [(Key, a)]
+
+  -- | Create a table from a list of specified values.  The value at
+  --   @xs !! k@ will be associated with the key @k@ in @fromList xs@.
+  fromList :: [a] -> (KMonad c) (c a)
+  fromList = unsafeFromListWithKeys . zip [initKey..]
+
+  -- | Create a table from the specified @(key,value)@ pairs (this is
+  --   the inverse of @assocs@).
+  --
+  --   The keys are /not/ assumed to be in any particular order.
+  --
+  --   However, the behaviour is undefined if any keys are @<0@ or
+  --   there are duplicate keys.
+  unsafeFromListWithKeys :: [(Key, a)] -> (KMonad c) (c a)
+
+  -- | Merge the two tables together by \"appending\" the second table
+  --   to the first.  Also returned is the translation function
+  --   between keys from the second table to the first.
+  merge :: c a -> c a -> (KMonad c) ((Key -> Key), c a)
+
+  -- | Remove any keys present in the second table from the first.
+  difference :: c a -> c a -> (KMonad c) (c a)
+
+  -- | Apply a mapping function within the specified monad (hence not
+  --   equivalent to 'fmap').
+  map :: (a -> b) -> c a -> (KMonad c) (c b)
+  map = mapWithKey . const
+
+  -- | Apply a mapping function over the values in the table whilst
+  --   also considering the actual keys.
+  mapWithKey :: (Key -> a -> b) -> c a -> (KMonad c) (c b)
+
+-- Need equivalent of M.unions for non-overlapping tables?
+
+-- Traversal and face-finding code currently takes advantage of using
+-- Map to do difference; better way of doing it?
