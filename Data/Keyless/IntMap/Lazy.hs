@@ -17,98 +17,97 @@ import qualified Data.IntMap.Lazy as M
 
 -- -----------------------------------------------------------------------------
 
-data KeylessIntMap m a = KM { table   :: !(M.IntMap a)
-                            , nextKey :: {-# UNPACK #-} !Key
-                            }
-                       deriving (Eq, Ord, Show, Read)
+data KeylessIntMap a = KM { table   :: !(M.IntMap a)
+                          , nextKey :: {-# UNPACK #-} !Key
+                          }
+                     deriving (Eq, Ord, Show, Read)
 
-instance Functor (KeylessIntMap m) where
+instance Functor KeylessIntMap where
   fmap f km = km { table = fmap f $ table km }
 
-initKM :: KeylessIntMap m a
+initKM :: KeylessIntMap a
 initKM = KM M.empty initKey
 
-insertKM :: (Monad m) => a -> KeylessIntMap m a -> m (Key, KeylessIntMap m a)
-insertKM v (KM tbl k) = return (k, KM tbl' k')
+insertKM :: a -> KeylessIntMap a -> (Key, KeylessIntMap a)
+insertKM v (KM tbl k) = (k, KM tbl' k')
   where
     k' = succ k
     tbl' = M.insert k v tbl
 
-deleteKM      :: (Monad m) => Key -> KeylessIntMap m a -> m (KeylessIntMap m a)
-deleteKM k km = return $ km { table = M.delete k $ table km }
+deleteKM      :: Key -> KeylessIntMap a -> KeylessIntMap a
+deleteKM k km = km { table = M.delete k $ table km }
 
-lookupKM   :: (Monad m) => Key -> KeylessIntMap m a -> m (Maybe a)
-lookupKM k = return . M.lookup k . table
+lookupKM   :: Key -> KeylessIntMap a -> Maybe a
+lookupKM k = M.lookup k . table
 
-unsafeLookupKM   :: (Monad m) => Key -> KeylessIntMap m a -> m a
-unsafeLookupKM k = return . (M.! k) . table
+unsafeLookupKM   :: Key -> KeylessIntMap a -> a
+unsafeLookupKM k = (M.! k) . table
 
-hasEntryKM   :: (Monad m) => Key -> KeylessIntMap m a -> m Bool
-hasEntryKM k = return . M.member k . table
+hasEntryKM   :: Key -> KeylessIntMap a -> Bool
+hasEntryKM k = M.member k . table
 
-adjustKM :: (Monad m) => (a -> a) -> Key -> KeylessIntMap m a -> m (KeylessIntMap m a)
-adjustKM f k km = return $ km { table = M.adjust f k $ table km }
+adjustKM :: (a -> a) -> Key -> KeylessIntMap a -> KeylessIntMap a
+adjustKM f k km = km { table = M.adjust f k $ table km }
 
-sizeKM :: (Monad m) => KeylessIntMap m a -> m Int
-sizeKM = return . M.size . table
+sizeKM :: KeylessIntMap a -> Int
+sizeKM = M.size . table
 
-minKeyKM :: (Monad m) => KeylessIntMap m a -> m (Maybe Key)
-minKeyKM = return . fmap (fst . fst) . M.minViewWithKey . table
+minKeyKM :: KeylessIntMap a -> Maybe Key
+minKeyKM = fmap (fst . fst) . M.minViewWithKey . table
 
-maxKeyKM :: (Monad m) => KeylessIntMap m a -> m (Maybe Key)
-maxKeyKM = return . fmap (fst . fst) . M.maxViewWithKey . table
+maxKeyKM :: KeylessIntMap a -> Maybe Key
+maxKeyKM = fmap (fst . fst) . M.maxViewWithKey . table
 
 -- Can use this for Map as we only store values we want.
-isNullKM :: (Monad m) => KeylessIntMap m a -> m Bool
-isNullKM = return . M.null . table
+isNullKM :: KeylessIntMap a -> Bool
+isNullKM = M.null . table
 
-keysKM :: (Monad m) => KeylessIntMap m a -> m [Key]
-keysKM = return . M.keys . table
+keysKM :: KeylessIntMap a -> [Key]
+keysKM = M.keys . table
 
-valuesKM :: (Monad m) => KeylessIntMap m a -> m [a]
-valuesKM = return . M.elems . table
+valuesKM :: KeylessIntMap a -> [a]
+valuesKM = M.elems . table
 
-assocsKM :: (Monad m) => KeylessIntMap m a -> m [(Key, a)]
-assocsKM = return . M.assocs . table
+assocsKM :: KeylessIntMap a -> [(Key, a)]
+assocsKM = M.assocs . table
 
-fromListKM    :: (Monad m) => [a] -> m (KeylessIntMap m a)
-fromListKM vs = return $ KM tbl nxtK
+fromListKM    :: [a] -> KeylessIntMap a
+fromListKM vs = KM tbl nxtK
   where
     tbl = M.fromAscList $ zip [initKey..] vs
     nxtK = maybe initKey (succ . fst . fst) $ M.maxViewWithKey tbl
 
-unsafeFromListWithKeysKM     :: (Monad m) => [(Key, a)] -> m (KeylessIntMap m a)
-unsafeFromListWithKeysKM kvs = return $ KM tbl nxtK
+unsafeFromListWithKeysKM     :: [(Key, a)] -> KeylessIntMap a
+unsafeFromListWithKeysKM kvs = KM tbl nxtK
   where
     tbl = M.fromList kvs -- Don't know if sorted
     nxtK = maybe initKey (succ . fst . fst) $ M.maxViewWithKey tbl
 
-mergeKM :: (Monad m) => KeylessIntMap m a -> KeylessIntMap m a
-           -> m ((Key -> Key), KeylessIntMap m a)
-mergeKM (KM tbl1 n1) (KM tbl2 n2) = return (kf, KM tbl nxt)
+mergeKM :: KeylessIntMap a -> KeylessIntMap a
+           -> ((Key -> Key), KeylessIntMap a)
+mergeKM (KM tbl1 n1) (KM tbl2 n2) = (kf, KM tbl nxt)
   where
     kf = (+n1)
     tbl2' = M.mapKeysMonotonic kf tbl2
     tbl = M.union tbl1 tbl2'
     nxt = kf n2
 
-differenceKM :: (Monad m) => KeylessIntMap m a -> KeylessIntMap m a
-                -> m (KeylessIntMap m a)
-differenceKM km1 km2 = return $ km1 { table = table km1 `M.difference` table km2 }
+differenceKM :: KeylessIntMap a -> KeylessIntMap a
+                -> KeylessIntMap a
+differenceKM km1 km2 = km1 { table = table km1 `M.difference` table km2 }
 
-mapKM   :: (Monad m) => (a -> b) -> KeylessIntMap m a -> m (KeylessIntMap m b)
-mapKM f = return . fmap f
+mapKM   :: (a -> b) -> KeylessIntMap a -> KeylessIntMap b
+mapKM f = fmap f
 
-mapWithKeyKM     :: (Monad m) => (Key -> a -> b) -> KeylessIntMap m a
-                    -> m (KeylessIntMap m b)
-mapWithKeyKM f km = return $ km { table = M.mapWithKey f $ table km }
+mapWithKeyKM     :: (Key -> a -> b) -> KeylessIntMap a
+                    -> KeylessIntMap b
+mapWithKeyKM f km = km { table = M.mapWithKey f $ table km }
 
 -- -----------------------------------------------------------------------------
 
-instance (Monad m) => Keyless (KeylessIntMap m) where
-  type KMonad (KeylessIntMap m) = m
+instance Keyless KeylessIntMap where
 
-  empty = return initKM
+  empty = initKM
   {-# INLINE empty #-}
 
   insert = insertKM

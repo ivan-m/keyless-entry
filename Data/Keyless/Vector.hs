@@ -14,7 +14,7 @@ module Data.Keyless.Vector where
 import Prelude hiding (lookup, map)
 
 import Data.Keyless
-import Data.Maybe(isNothing, isJust, catMaybes)
+import Data.Maybe(isNothing, isJust, catMaybes, fromMaybe)
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import Control.Monad(liftM2, forM_)
@@ -29,13 +29,14 @@ import Control.Arrow(second, (***))
 -- Using Set would give us log complexity back; another Vector would
 -- take O(l) for getting all keys...
 
-data KeylessVector (m :: * -> *) a = KV { table      :: !(V.Vector (Maybe a))
-                            , nextKey    :: {-# UNPACK #-} !Key
-                              -- Invariant: for (Just (k1,k2)), k1 <= k2.
-                            , bounds     :: !(Maybe (Key,Key))
-                            -- Invariant: numVals >= 0; numVals == 0 iff bounds == Nothing
-                            , numVals    :: {-# UNPACK #-} !Int
-                            }
+data KeylessVector a = KV { table      :: !(V.Vector (Maybe a))
+                          , nextKey    :: {-# UNPACK #-} !Key
+                            -- Invariant: for (Just (k1,k2)), k1 <= k2.
+                          , bounds     :: !(Maybe (Key,Key))
+                          -- Invariant: numVals >= 0; numVals == 0 iff bounds == Nothing
+                          , numVals    :: {-# UNPACK #-} !Int
+                          }
+                     deriving (Eq, Ord, Show, Read)
 
 -- We need c more values; increase if necessary or return original
 -- vector.
@@ -57,8 +58,7 @@ checkSize c k v
            $ fromIntegral needLen / fromIntegral len
     missingLen = len' - len
 
-boundCheck :: r -> Key -> KeylessVector m a
-              -> r -> r
+boundCheck :: r -> Key -> KeylessVector a -> r -> r
 boundCheck fl k kv act
   | k < initKey || k >= V.length (table kv) = fl
   | otherwise                               = act
@@ -74,39 +74,31 @@ startSize = 10
 --   By creating a value of the required size up-front when you know
 --   how big your data set is likely to be, you can avoid
 --   re-allocation when the table runs out of space.
-emptySized :: (Monad m) => Int -> m (KeylessVector m a)
-emptySized = return . emptySizedBase . max 1
+emptySized :: Int -> KeylessVector a
+emptySized = emptySizedBase . max 1
 -- Having an initial size of 1 is pretty stupid, but don't want to
 -- "require" having a minimum of size 10.
 
-emptySizedBase     :: Int -> KeylessVector m a
+emptySizedBase     :: Int -> KeylessVector a
 emptySizedBase len = KV { table = V.replicate len Nothing
                         , nextKey = initKey
                         , bounds = Nothing
                         , numVals = 0
                         }
 
-{-
-
-freezeKeys :: (Monad m) => KeylessVector m a -> BaseMonad m (PV.Vector Bool)
-freezeKeys = PV.freeze . validKeys
-
-usedKeys :: (Monad m) => KeylessVector m a -> BaseMonad m (PV.Vector Int)
-usedKeys = liftM (PV.findIndices id) . freezeKeys
-
--}
-
 -- -----------------------------------------------------------------------------
 
-initKV :: (Monad m) => m (KeylessVector m a)
+initKV :: KeylessVector a
 initKV = emptySized startSize
 
-insertKV :: (Monad m) => a -> KeylessVector m a -> m (Key, KeylessVector m a)
-insertKV a kv = return (k, kv')
+insertKV :: a -> KeylessVector a -> (Key, KeylessVector a)
+insertKV a kv = (k, kv')
   where
     k = nextKey kv
     v = table kv
 
+    -- Using modify here rather than update because it will probably
+    -- have been resized and thus fusion!
     v' = V.modify (\ mv -> MV.write mv k (Just a)) $ checkSize 1 k v
 
     kv' = kv { table = v'
@@ -116,11 +108,10 @@ insertKV a kv = return (k, kv')
              }
 
 -- Need to read first to see if the numVal count should be adjusted.
-deleteKV      :: (Monad m) => Key -> KeylessVector m a
-                 -> m (KeylessVector m a)
+deleteKV      :: Key -> KeylessVector a -> KeylessVector a
 deleteKV k kv
-  | isNothing $ bounds kv = return kv -- No keys to worry about!
-  | otherwise             = return . boundCheck kv k kv
+  | isNothing $ bounds kv = kv -- No keys to worry about!
+  | otherwise             = boundCheck kv k kv
                             $ if isNothing ma
                               then kv
                               else kv { table   = tbl'
@@ -139,71 +130,67 @@ deleteKV k kv
       | maxK == k    = (minK,) <$> V.findIndex isJust (V.reverse tbl')
       | otherwise    = bnds
 
-lookupKV :: (Monad m) => Key -> KeylessVector m a -> m (Maybe a)
-lookupKV k kv = return . boundCheck Nothing k kv
-                $ table kv V.! k
+lookupKV :: Key -> KeylessVector a -> Maybe a
+lookupKV k kv = boundCheck Nothing k kv $ table kv V.! k
 
 -- Not using the default to avoid doing bound-checking, etc.
-unsafeLookupKV      :: (Monad m) => Key -> KeylessVector m a -> m a
-unsafeLookupKV k kv = maybe err return $ table kv V.! k
+unsafeLookupKV      :: Key -> KeylessVector a -> a
+unsafeLookupKV k kv = fromMaybe err $ table kv V.! k
   where
     err = error $ "There is no value corresponding to the key `" ++ show k ++ "'\
                    \ in the provided KeylessVector."
 
-hasEntryKV      :: (Monad m) => Key -> KeylessVector m a -> m Bool
-hasEntryKV k kv = return . boundCheck False k kv . isJust $ table kv V.! k
+hasEntryKV      :: Key -> KeylessVector a -> Bool
+hasEntryKV k kv = boundCheck False k kv . isJust $ table kv V.! k
 
 
 -- What happens if the function is strict and the value is undefined?
-adjustKV :: (Monad m) => (a -> a) -> Key -> KeylessVector m a
-            -> m (KeylessVector m a)
-adjustKV f k kv = return . boundCheck kv k kv $ kv { table = v' }
+adjustKV :: (a -> a) -> Key -> KeylessVector a -> KeylessVector a
+adjustKV f k kv = boundCheck kv k kv $ kv { table = v' }
   where
     v' = V.modify (\ mv -> MV.unsafeWrite mv k . fmap f =<< MV.unsafeRead mv k)
          $ table kv
 
-sizeKV :: (Monad m) => KeylessVector m a -> m Int
-sizeKV = return . numVals
+sizeKV :: KeylessVector a -> Int
+sizeKV = numVals
 
-minKeyKV :: (Monad m) => KeylessVector m a -> m (Maybe Key)
-minKeyKV = return . fmap fst . bounds
+minKeyKV :: KeylessVector a -> Maybe Key
+minKeyKV = fmap fst . bounds
 
-maxKeyKV :: (Monad m) => KeylessVector m a -> m (Maybe Key)
-maxKeyKV = return . fmap snd . bounds
+maxKeyKV :: KeylessVector a -> Maybe Key
+maxKeyKV = fmap snd . bounds
 
 -- Use default for isNull; other option is to see if bounds are Nothing.
 
+keysKV :: KeylessVector a -> [Key]
+keysKV = V.toList . V.findIndices isJust . table
 
-keysKV :: (Monad m) => KeylessVector m a -> m [Key]
-keysKV = return . V.toList . V.findIndices isJust . table
+valuesKV :: KeylessVector a -> [a]
+valuesKV = catMaybes . V.toList . table
 
-valuesKV :: (Monad m) => KeylessVector m a -> m [a]
-valuesKV = return . catMaybes . V.toList . table
+assocsKV :: KeylessVector a -> [(Key, a)]
+assocsKV = catMaybes . V.toList . V.imap (fmap . (,)) . table
 
-assocsKV :: (Monad m) => KeylessVector m a -> m [(Key, a)]
-assocsKV = return . catMaybes . V.toList . V.imap (fmap . (,)) . table
-
-fromListKV :: (Monad m) => [a] -> m (KeylessVector m a)
+fromListKV :: [a] -> KeylessVector a
 fromListKV xs
   | null xs   = initKV
-  | otherwise = return $ KV { table     = tbl
-                            , nextKey   = len
-                            , bounds    = Just (0, len-1)
-                            , numVals   = len
-                            }
+  | otherwise = KV { table     = tbl
+                   , nextKey   = len
+                   , bounds    = Just (0, len-1)
+                   , numVals   = len
+                   }
   where
     tbl = V.fromList $ fmap Just xs
     len = V.length tbl
 
-unsafeFromListWithKeysKV :: (Monad m) => [(Key,a)]
-                            -> m (KeylessVector m a)
+unsafeFromListWithKeysKV :: [(Key,a)] -> KeylessVector a
 unsafeFromListWithKeysKV kxs
   | null kxs  = initKV
-  | otherwise = return $ KV { table = tbl
-                            , nextKey = len
-                            , bounds  = Just (minK, maxK)
-                            , numVals = cnt
-                            }
+  | otherwise = KV { table = tbl
+                   , nextKey = len
+                   , bounds  = Just (minK, maxK)
+                   , numVals = cnt
+                   }
   where
     ks = fmap fst kxs
 
@@ -221,13 +208,12 @@ unsafeFromListWithKeysKV kxs
 
 -- Keep up to the last value that /might/ have been in either one,
 -- even if deleted (for the sake of consistency)
-mergeKV :: (Monad m) => KeylessVector m a -> KeylessVector m a
-           -> m ((Key -> Key), KeylessVector m a)
-mergeKV kv1 kv2 = return . (kf,) $ KV { table   = tbl
-                                      , nextKey = kf n2  -- Even if n2 == 0, this will be equal to n1
-                                      , bounds  = bnds
-                                      , numVals = numVals kv1 + numVals kv2
-                                      }
+mergeKV :: KeylessVector a -> KeylessVector a -> ((Key -> Key), KeylessVector a)
+mergeKV kv1 kv2 = (kf,) $ KV { table   = tbl
+                             , nextKey = kf n2  -- Even if n2 == 0, this will be equal to n1
+                             , bounds  = bnds
+                             , numVals = numVals kv1 + numVals kv2
+                             }
   where
     tbl = V.modify (\mv -> V.unsafeCopy (MV.slice n1 len2 mv)
                            . V.slice 0 len2 $ table kv2)
@@ -244,9 +230,8 @@ mergeKV kv1 kv2 = return . (kf,) $ KV { table   = tbl
                 (bnd1          , Nothing       ) -> bnd1
                 (Nothing       , bnd2          ) -> bnd2
 
-differenceKV :: (Monad m) => KeylessVector m a -> KeylessVector m a
-                -> m (KeylessVector m a)
-differenceKV kv1 kv2 = return . maybe kv1 newKV $ mkRng bnds1 bnds2
+differenceKV :: KeylessVector a -> KeylessVector a -> KeylessVector a
+differenceKV kv1 kv2 = maybe kv1 newKV $ mkRng bnds1 bnds2
   where
     bnds1 = bounds kv1
     bnds2 = bounds kv2
@@ -291,18 +276,13 @@ differenceKV kv1 kv2 = return . maybe kv1 newKV $ mkRng bnds1 bnds2
 
     rap = uncurry (***)
 
+mapKV      :: (a -> b) -> KeylessVector a -> KeylessVector b
+mapKV f kv = kv { table = V.map (fmap f) $ table kv }
 
-mapKV      :: (Monad m) => (a -> b) -> KeylessVector m a
-              -> m (KeylessVector m b)
-mapKV f kv = return $ kv { table = V.map (fmap f) $ table kv }
+mapWithKeyKV      :: (Key -> a -> b) -> KeylessVector a -> KeylessVector b
+mapWithKeyKV f kv = kv { table = V.imap (fmap . f) $ table kv }
 
-mapWithKeyKV      :: (Monad m) => (Key -> a -> b) -> KeylessVector m a
-                     -> m (KeylessVector m b)
-mapWithKeyKV f kv = return $ kv { table = V.imap (fmap . f) $ table kv }
-
-
-instance (Monad m) => Keyless (KeylessVector m) where
-  type KMonad (KeylessVector m) = m
+instance Keyless KeylessVector where
 
   empty = initKV
   {-# INLINE empty #-}

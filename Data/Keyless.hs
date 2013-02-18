@@ -14,7 +14,6 @@ module Data.Keyless where
 
 import Prelude hiding (lookup, map)
 import Data.Maybe(isJust, fromMaybe)
-import Control.Monad(liftM)
 
 -- -----------------------------------------------------------------------------
 
@@ -28,66 +27,64 @@ type Key = Int
 initKey :: Key
 initKey = 0
 
-class (Monad (KMonad c)) => Keyless c where
-
-  type KMonad c :: * -> *
+class Keyless c where
 
   -- | A blank lookup table.
-  empty :: (KMonad c) (c a)
+  empty :: c a
 
   -- | Insert the provided value into the table
-  insert :: a -> c a -> (KMonad c) (Key, c a)
+  insert :: a -> c a -> (Key, c a)
 
   -- | Remove the specified entry from the table.  Won't do anything
   --   if the key is not in the table.
-  delete :: Key -> c a -> (KMonad c) (c a)
+  delete :: Key -> c a -> c a
 
   -- | Return the value associated with the specified key if it is in
   --   the table.
-  lookup :: Key -> c a -> (KMonad c) (Maybe a)
+  lookup :: Key -> c a -> (Maybe a)
 
   -- | As with 'lookup', but assumes the key is in the table.
-  unsafeLookup   :: Key -> c a -> (KMonad c) a
-  unsafeLookup k = liftM (fromMaybe err) . lookup k
+  unsafeLookup   :: Key -> c a -> a
+  unsafeLookup k = fromMaybe err . lookup k
     where
       err = error $ "The key `" ++ show k ++ "' does not have a corresponding value."
 
   -- | Is the following entry in the table?
-  hasEntry   :: Key -> c a -> (KMonad c) Bool
-  hasEntry k = liftM isJust . lookup k
+  hasEntry   :: Key -> c a -> Bool
+  hasEntry k = isJust . lookup k
 
   -- | Apply a function on the value associated with the specified key.
-  adjust :: (a -> a) -> Key -> c a -> (KMonad c) (c a)
+  adjust :: (a -> a) -> Key -> c a -> (c a)
 
   -- | How many values are currently stored.
-  size :: c a -> (KMonad c) Int
-  size = liftM length . keys
+  size :: c a -> Int
+  size = length . keys
 
   -- | The smallest key being used; 'Nothing' indicates 'isNull'.
-  minKey :: c a -> (KMonad c) (Maybe Key)
+  minKey :: c a -> Maybe Key
 
   -- | The largest key being used; 'Nothing' indicates 'isNull'.  Note
   --   that the next key will /not/ necessarily be @(+1)@ of this.
-  maxKey :: c a -> (KMonad c) (Maybe Key)
+  maxKey :: c a -> Maybe Key
 
   -- | Are there any values being stored?
-  isNull :: c a -> (KMonad c) Bool
-  isNull = liftM (0==) . size
+  isNull :: c a -> Bool
+  isNull = (0==) . size
 
   -- | Return all keys in the table.
-  keys :: c a -> (KMonad c) [Key]
-  keys = liftM (fmap fst) . assocs
+  keys :: c a -> [Key]
+  keys = fmap fst . assocs
 
   -- | Return all values in the table.
-  values :: c a -> (KMonad c) [a]
-  values = liftM (fmap snd) . assocs
+  values :: c a -> [a]
+  values = fmap snd . assocs
 
   -- | Return all @(key,value)@ pairs in the table.
-  assocs :: c a -> (KMonad c) [(Key, a)]
+  assocs :: c a -> [(Key, a)]
 
   -- | Create a table from a list of specified values.  The value at
   --   @xs !! k@ will be associated with the key @k@ in @fromList xs@.
-  fromList :: [a] -> (KMonad c) (c a)
+  fromList :: [a] -> c a
   fromList = unsafeFromListWithKeys . zip [initKey..]
 
   -- | Create a table from the specified @(key,value)@ pairs (this is
@@ -97,24 +94,24 @@ class (Monad (KMonad c)) => Keyless c where
   --
   --   However, the behaviour is undefined if any keys are @<0@ or
   --   there are duplicate keys.
-  unsafeFromListWithKeys :: [(Key, a)] -> (KMonad c) (c a)
+  unsafeFromListWithKeys :: [(Key, a)] -> c a
 
   -- | Merge the two tables together by \"appending\" the second table
   --   to the first.  Also returned is the translation function
   --   between keys from the second table to the first.
-  merge :: c a -> c a -> (KMonad c) ((Key -> Key), c a)
+  merge :: c a -> c a -> ((Key -> Key), c a)
 
   -- | Remove any keys present in the second table from the first.
-  difference :: c a -> c a -> (KMonad c) (c a)
+  difference :: c a -> c a -> c a
 
   -- | Apply a mapping function within the specified monad (hence not
   --   equivalent to 'fmap').
-  map :: (a -> b) -> c a -> (KMonad c) (c b)
+  map :: (a -> b) -> c a -> c b
   map = mapWithKey . const
 
   -- | Apply a mapping function over the values in the table whilst
   --   also considering the actual keys.
-  mapWithKey :: (Key -> a -> b) -> c a -> (KMonad c) (c b)
+  mapWithKey :: (Key -> a -> b) -> c a -> c b
 
 -- Need equivalent of M.unions for non-overlapping tables?
 
