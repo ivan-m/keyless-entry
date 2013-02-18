@@ -104,11 +104,6 @@ class (Functor c) => Keyless c where
   -- | Remove any keys present in the second table from the first.
   difference :: c a -> c a -> c a
 
-  -- | Apply a mapping function within the specified monad (hence not
-  --   equivalent to 'fmap').
-  map :: (a -> b) -> c a -> c b
-  map = mapWithKey . const
-
   -- | Apply a mapping function over the values in the table whilst
   --   also considering the actual keys.
   mapWithKey :: (Key -> a -> b) -> c a -> c b
@@ -117,3 +112,7 @@ class (Functor c) => Keyless c where
 
 -- Traversal and face-finding code currently takes advantage of using
 -- Map to do difference; better way of doing it?
+
+-- | An alias for 'fmap'.
+map :: (Keyless c) => (a -> b) -> c a -> c b
+map = fmap
