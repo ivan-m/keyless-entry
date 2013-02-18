@@ -116,3 +116,11 @@ class (Functor c) => Keyless c where
 -- | An alias for 'fmap'.
 map :: (Keyless c) => (a -> b) -> c a -> c b
 map = fmap
+
+-- | A flipped, infix alias for 'unsafeLookup'.
+(!) :: (Keyless c) => c a -> Key -> a
+c ! k = unsafeLookup k c
+
+-- | A flipped, infix alias for 'lookup'.
+(!?) :: (Keyless c) => c a -> Key -> Maybe a
+c !? a = lookup a c
