@@ -20,6 +20,7 @@ import qualified Data.Vector.Mutable as MV
 import Control.Monad(liftM2, forM_)
 import Control.Applicative((<|>),(<$>))
 import Control.Arrow(second, (***))
+import Control.DeepSeq(NFData(..))
 
 -- -----------------------------------------------------------------------------
 
@@ -44,6 +45,9 @@ data KeylessVector a = KV { table      :: !(V.Vector (Maybe a))
 instance Functor KeylessVector where
   fmap = mapKV
   {-# INLINE fmap #-}
+
+instance (NFData a) => NFData (KeylessVector a) where
+  rnf (KV tbl nk bnds nv) = rnf tbl `seq` rnf nk `seq` bnds `seq` rnf nv
 
 checkSize :: Int -> Key -> V.Vector (Maybe a) -> V.Vector (Maybe a)
 checkSize c k v

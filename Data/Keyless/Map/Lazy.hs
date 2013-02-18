@@ -12,6 +12,7 @@ module Data.Keyless.Map.Lazy where
 import Prelude hiding (lookup, map)
 import Data.Keyless
 import qualified Data.Map.Lazy as M
+import Control.DeepSeq(NFData(..))
 
 -- -----------------------------------------------------------------------------
 
@@ -23,6 +24,9 @@ data KeylessMap a = KM { table   :: !(M.Map Key a)
 instance Functor KeylessMap where
   fmap = mapKM
   {-# INLINE fmap #-}
+
+instance (NFData a) => NFData (KeylessMap a) where
+  rnf (KM tbl nk) = rnf tbl `seq` rnf nk
 
 initKM :: KeylessMap a
 initKM = KM M.empty initKey
