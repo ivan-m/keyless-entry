@@ -21,7 +21,8 @@ data KeylessMap a = KM { table   :: !(M.Map Key a)
                   deriving (Eq, Ord, Show, Read)
 
 instance Functor KeylessMap where
-  fmap f km = km { table = fmap f $ table km }
+  fmap = mapKM
+  {-# INLINE fmap #-}
 
 initKM :: KeylessMap a
 initKM = KM M.empty initKey
@@ -158,9 +159,6 @@ instance Keyless KeylessMap where
 
   difference = differenceKM
   {-# INLINE difference #-}
-
-  map = mapKM
-  {-# INLINE map #-}
 
   mapWithKey = mapWithKeyKM
   {-# INLINE mapWithKey #-}

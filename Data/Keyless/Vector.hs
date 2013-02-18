@@ -41,6 +41,10 @@ data KeylessVector a = KV { table      :: !(V.Vector (Maybe a))
 -- We need c more values; increase if necessary or return original
 -- vector.
 
+instance Functor KeylessVector where
+  fmap = mapKV
+  {-# INLINE fmap #-}
+
 checkSize :: Int -> Key -> V.Vector (Maybe a) -> V.Vector (Maybe a)
 checkSize c k v
   | needLen <= len = v
@@ -337,9 +341,6 @@ instance Keyless KeylessVector where
 
   difference = differenceKV
   {-# INLINE difference #-}
-
-  map = mapKV
-  {-# INLINE map #-}
 
   mapWithKey = mapWithKeyKV
   {-# INLINE mapWithKey #-}

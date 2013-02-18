@@ -27,7 +27,7 @@ type Key = Int
 initKey :: Key
 initKey = 0
 
-class Keyless c where
+class (Functor c) => Keyless c where
 
   -- | A blank lookup table.
   empty :: c a
