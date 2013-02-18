@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeFamilies, PolyKinds #-}
 {- |
    Module      : Data.Keyless.IntMap.Lazy
    Description : Lazy IntMap-based lookup tables.

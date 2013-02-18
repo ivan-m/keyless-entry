@@ -1,6 +1,4 @@
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE TypeFamilies #-}
 {- |
    Module      : Data.Keyless.Vector
    Description : Lazy Map-based lookup tables.

@@ -1,4 +1,3 @@
-{-# LANGUAGE FlexibleContexts, TypeFamilies #-}
 {- |
    Module      : Data.Keyless
    Description : Class of lookup tables with generated keys.
