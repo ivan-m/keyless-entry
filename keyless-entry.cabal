@@ -19,7 +19,5 @@ library
   -- other-modules:
   build-depends:         base >=4.6 && < 5,
                        , vector ==0.10.*
-                       , monad-prim ==0.1.*
-                       , primitive ==0.5.*
                        , containers >=0.5 && < 6
                        , deepseq == 1.3.*
