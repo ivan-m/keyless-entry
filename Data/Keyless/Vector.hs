@@ -130,11 +130,15 @@ deleteKV k kv
     ma = tbl V.! k
 
     tbl' = V.modify (\mv -> MV.write mv k Nothing) tbl
+
+    getBound f = fmap fst . V.find (isJust . snd) . f
+                 . V.slice minK (max 0 $ maxK-minK+1)
+                 $ V.indexed tbl'
+
     bnds'
       | minK == maxK = Nothing -- Implies ==k as well
-      | minK == k    = (,maxK) <$> V.findIndex isJust tbl'
-      | maxK == k    = (minK,) . fst <$> V.find (isJust . snd)
-                                                (V.reverse $ V.indexed tbl')
+      | minK == k    = (,maxK) <$> getBound id
+      | maxK == k    = (minK,) <$> getBound V.reverse
       | otherwise    = bnds
 
 lookupKV :: Key -> KeylessVector a -> Maybe a
@@ -250,14 +254,15 @@ differenceKV kv1 kv2 = maybe kv1 newKV $ mkRng bnds1 bnds2
 
     newKV (minS,maxS)
       | V.null delIndices = kv1
-      | otherwise         = kv1 { table = tbl'
-                                , bounds = bnds'
+      | otherwise         = kv1 { table   = tbl'
+                                , bounds  = bnds'
                                 , numVals = numV - numDel
                                 }
       where
-        delIndices = V.findIndices isJust . V.slice minS lenS $ tbl1
+        delIndices = V.map fst . V.filter (isJust . snd) . V.slice minS lenS
+                     $ V.indexed tbl2
         lenS = max 0 $ maxS - minS + 1
-        numDel = V.length . V.findIndices isJust $ V.unsafeBackpermute tbl2 delIndices
+        numDel = V.length . V.findIndices isJust $ V.unsafeBackpermute tbl1 delIndices
 
         tbl' = V.unsafeUpdate tbl1 $ V.map (,Nothing) delIndices
 
@@ -268,18 +273,19 @@ differenceKV kv1 kv2 = maybe kv1 newKV $ mkRng bnds1 bnds2
 
         bnds' = liftM2 (,) min' max'
 
+        getBound f = fmap fst . V.find (isJust . snd) . f
+                     . V.slice min1 (max 0 $ max1-min1+1)
+                     $ V.indexed tbl'
+
         min' | numV == numDel         = Nothing
              | min1 < minS            = Just min1
              | isJust $ tbl' V.! min1 = Just min1
-             | otherwise              = V.findIndex isJust tbl1Int
+             | otherwise              = getBound id
 
         max' | numV == numDel         = Nothing
              | max1 > maxS            = Just max1
              | isJust $ tbl' V.! max1 = Just max1
-             | otherwise              = V.findIndex isJust . V.reverse $ tbl1Int
-
-        -- The "interesting" bit.
-        tbl1Int = V.slice min1 (max1 - min1 + 1) tbl1
+             | otherwise              = getBound V.reverse
 
     rap = uncurry (***)
 
