@@ -133,7 +133,8 @@ deleteKV k kv
     bnds'
       | minK == maxK = Nothing -- Implies ==k as well
       | minK == k    = (,maxK) <$> V.findIndex isJust tbl'
-      | maxK == k    = (minK,) <$> V.findIndex isJust (V.reverse tbl')
+      | maxK == k    = (minK,) . fst <$> V.find (isJust . snd)
+                                                (V.reverse $ V.indexed tbl')
       | otherwise    = bnds
 
 lookupKV :: Key -> KeylessVector a -> Maybe a
