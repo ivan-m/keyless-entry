@@ -59,7 +59,7 @@ checkSize c k v
     needLen = c + k
     len = V.length v
     -- Wanting length to always be 2^n * startSize
-    len' = (*) len . (^) (2::Int)
+    len' = (*) len . (^) (2::Int) . (`asTypeOf`(undefined::Int))
            . ceiling . logBase (2::Double)
            $ fromIntegral needLen / fromIntegral len
     missingLen = len' - len
