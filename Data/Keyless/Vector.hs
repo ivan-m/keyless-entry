@@ -92,8 +92,8 @@ startSize = 10
 --   By creating a value of the required size up-front when you know
 --   how big your data set is likely to be, you can avoid
 --   re-allocation when the table runs out of space.
-emptySized :: Int -> KeylessVector a
-emptySized = emptySizedBase . max 1
+initSized :: Int -> KeylessVector a
+initSized = emptySizedBase . max 1
 -- Having an initial size of 1 is pretty stupid, but don't want to
 -- "require" having a minimum of size 10.
 
@@ -106,7 +106,7 @@ emptySizedBase len = KV { table = V.replicate len Nothing
 -- -----------------------------------------------------------------------------
 
 initKV :: KeylessVector a
-initKV = emptySized startSize
+initKV = initSized startSize
 
 insertKV :: a -> KeylessVector a -> (Key, KeylessVector a)
 insertKV a kv = (k, kv')
@@ -272,6 +272,9 @@ instance Keyless KeylessVector where
 
   empty = initKV
   {-# INLINE empty #-}
+
+  emptySized = initSized
+  {-# INLINE emptySized #-}
 
   insert = insertKV
   {-# INLINE insert #-}

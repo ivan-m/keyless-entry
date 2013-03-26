@@ -31,6 +31,11 @@ class (Functor c) => Keyless c where
   -- | A blank lookup table.
   empty :: c a
 
+  -- | A blank lookup table with specified default size.  Only useful
+  --   for 'Vector'-based tables; otherwise identical to 'empty'.
+  emptySized   :: Int -> c a
+  emptySized _ = empty
+
   -- | Insert the provided value into the table
   insert :: a -> c a -> (Key, c a)
 
