@@ -17,9 +17,10 @@ import Data.Monoid(mconcat)
 import Data.Ord(comparing)
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
-import Control.Monad(liftM2, forM_)
-import Control.Applicative((<|>),(<$>))
-import Control.Arrow(second, (***))
+import qualified Data.Vector.Generic as VG
+import qualified Data.Vector.Fusion.Stream as VS
+import Control.Applicative((<$>))
+import Control.Monad(forM_)
 import Control.DeepSeq(NFData(..))
 
 -- -----------------------------------------------------------------------------
@@ -32,9 +33,6 @@ import Control.DeepSeq(NFData(..))
 
 data KeylessVector a = KV { table      :: !(V.Vector (Maybe a))
                           , nextKey    :: {-# UNPACK #-} !Key
-                            -- Invariant: for (Just (k1,k2)), k1 <= k2.
-                          , bounds     :: !(Maybe (Key,Key))
-                          -- Invariant: numVals >= 0; numVals == 0 iff bounds == Nothing
                           , numVals    :: {-# UNPACK #-} !Int
                           }
                      deriving (Show, Read)
@@ -57,7 +55,7 @@ instance Functor KeylessVector where
   {-# INLINE fmap #-}
 
 instance (NFData a) => NFData (KeylessVector a) where
-  rnf (KV tbl nk bnds nv) = rnf tbl `seq` rnf nk `seq` bnds `seq` rnf nv
+  rnf (KV tbl nk nv) = rnf tbl `seq` rnf nk `seq` rnf nv
 
 checkSize :: Int -> Key -> V.Vector (Maybe a) -> V.Vector (Maybe a)
 checkSize c k v
@@ -100,7 +98,6 @@ emptySized = emptySizedBase . max 1
 emptySizedBase     :: Int -> KeylessVector a
 emptySizedBase len = KV { table = V.replicate len Nothing
                         , nextKey = initKey
-                        , bounds = Nothing
                         , numVals = 0
                         }
 
@@ -121,37 +118,24 @@ insertKV a kv = (k, kv')
 
     kv' = kv { table = v'
              , nextKey = k + 1
-             , bounds = fmap (second $ const k) (bounds kv) <|> Just (k,k)
              , numVals = numVals kv + 1
              }
 
 -- Need to read first to see if the numVal count should be adjusted.
-deleteKV      :: Key -> KeylessVector a -> KeylessVector a
+deleteKV :: Key -> KeylessVector a -> KeylessVector a
 deleteKV k kv
-  | isNothing $ bounds kv = kv -- No keys to worry about!
-  | otherwise             = boundCheck kv k kv
-                            $ if isNothing ma
-                              then kv
-                              else kv { table   = tbl'
-                                      , bounds  = bnds'
-                                      , numVals = numVals kv - 1
-                                      }
+  | numVals kv == 0 = kv -- No keys to worry about!
+  | otherwise       = boundCheck kv k kv
+                      $ if isNothing ma
+                        then kv
+                        else kv { table   = tbl'
+                                , numVals = numVals kv - 1
+                                }
   where
     tbl = table kv
-    bnds@(Just (minK, maxK)) = bounds kv
     ma = tbl V.! k
 
     tbl' = V.modify (\mv -> MV.write mv k Nothing) tbl
-
-    getBound f = fmap fst . V.find (isJust . snd) . f
-                 . V.slice minK (max 0 $ maxK-minK+1)
-                 $ V.indexed tbl'
-
-    bnds'
-      | minK == maxK = Nothing -- Implies ==k as well
-      | minK == k    = (,maxK) <$> getBound id
-      | maxK == k    = (minK,) <$> getBound V.reverse
-      | otherwise    = bnds
 
 lookupKV :: Key -> KeylessVector a -> Maybe a
 lookupKV k kv = boundCheck Nothing k kv $ table kv V.! k
@@ -178,28 +162,34 @@ sizeKV :: KeylessVector a -> Int
 sizeKV = numVals
 
 minKeyKV :: KeylessVector a -> Maybe Key
-minKeyKV = fmap fst . bounds
+minKeyKV = V.findIndex isJust . table
 
 maxKeyKV :: KeylessVector a -> Maybe Key
-maxKeyKV = fmap snd . bounds
+maxKeyKV kv = fmap fst . findR (isJust . snd)
+              . V.indexed . V.unsafeSlice initKey (nextKey kv) $ table kv
+
+findR :: (a -> Bool) -> V.Vector a -> Maybe a
+findR p = VS.find p . VG.streamR
 
 -- Use default for isNull; other option is to see if bounds are Nothing.
 
 keysKV :: KeylessVector a -> [Key]
-keysKV = V.toList . V.findIndices isJust . table
+keysKV kv = V.toList . V.findIndices isJust
+            . V.unsafeSlice initKey (nextKey kv) $ table kv
 
 valuesKV :: KeylessVector a -> [a]
-valuesKV = catMaybes . V.toList . table
+valuesKV kv = V.toList . V.map fromJust . V.filter isJust
+              . V.unsafeSlice initKey (nextKey kv) $ table kv
 
 assocsKV :: KeylessVector a -> [(Key, a)]
-assocsKV = catMaybes . V.toList . V.imap (fmap . (,)) . table
+assocsKV kv = V.toList . V.map fromJust . V.filter isJust . V.imap (fmap . (,))
+              . V.unsafeSlice initKey (nextKey kv) $ table kv
 
 fromListKV :: [a] -> KeylessVector a
 fromListKV xs
   | null xs   = initKV
   | otherwise = KV { table     = tbl
                    , nextKey   = len
-                   , bounds    = Just (0, len-1)
                    , numVals   = len
                    }
   where
@@ -211,13 +201,10 @@ unsafeFromListWithKeysKV kxs
   | null kxs  = initKV
   | otherwise = KV { table = tbl
                    , nextKey = len
-                   , bounds  = Just (minK, maxK)
                    , numVals = cnt
                    }
   where
     ks = fmap fst kxs
-
-    minK = minimum ks
 
     maxK = maximum ks
 
@@ -234,12 +221,15 @@ unsafeFromListWithKeysKV kxs
 mergeKV :: KeylessVector a -> KeylessVector a -> ((Key -> Key), KeylessVector a)
 mergeKV kv1 kv2 = (kf,) $ KV { table   = tbl
                              , nextKey = kf n2  -- Even if n2 == 0, this will be equal to n1
-                             , bounds  = bnds
                              , numVals = numVals kv1 + numVals kv2
                              }
   where
-    tbl = V.modify (\mv -> V.unsafeCopy (MV.slice n1 len2 mv)
-                           . V.slice 0 len2 $ table kv2)
+    -- This implementation seems to be more efficient for compact vectors.
+    -- tbl = V.unsafeSlice initKey n1 (table kv1)
+    --       V.++ V.unsafeSlice initKey n2 (table kv2)
+
+    tbl = V.modify (\mv -> V.unsafeCopy (MV.unsafeSlice n1 len2 mv)
+                           . V.unsafeSlice initKey len2 $ table kv2)
           . checkSize len2 n1 $ table kv1
 
     n1 = nextKey kv1
@@ -248,58 +238,27 @@ mergeKV kv1 kv2 = (kf,) $ KV { table   = tbl
     len2 = n2 -- The "effective" length of kv2
     kf = (+n1)
 
-    bnds = case (bounds kv1, fmap (kf *** kf) $ bounds kv2) of
-                (Just (minK1,_), Just (_,maxK2)) -> Just (minK1, maxK2)
-                (bnd1          , Nothing       ) -> bnd1
-                (Nothing       , bnd2          ) -> bnd2
-
 differenceKV :: KeylessVector a -> KeylessVector a -> KeylessVector a
-differenceKV kv1 kv2 = maybe kv1 newKV $ mkRng bnds1 bnds2
+differenceKV kv1 kv2
+  | isNull kv1 = kv1 -- Nothing to delete!
+  | isNull kv2 = kv1 -- Not deleting anything!!
+  | otherwise  = newKV
   where
-    bnds1 = bounds kv1
-    bnds2 = bounds kv2
-
     tbl1 = table kv1
     tbl2 = table kv2
 
-    mkRng = liftM2 $ rap . rap (max,min)
-
-    newKV (minS,maxS)
+    newKV
       | V.null delIndices = kv1
       | otherwise         = kv1 { table   = tbl'
-                                , bounds  = bnds'
                                 , numVals = numV - numDel
                                 }
       where
-        delIndices = V.map fst . V.filter (isJust . snd) . V.slice minS lenS
-                     $ V.indexed tbl2
-        lenS = max 0 $ maxS - minS + 1
+        delIndices = V.findIndices isJust $ V.unsafeSlice initKey (nextKey kv2) tbl2
         numDel = V.length . V.findIndices isJust $ V.unsafeBackpermute tbl1 delIndices
 
         tbl' = V.unsafeUpdate tbl1 $ V.map (,Nothing) delIndices
 
-        -- Will be Just
-        Just (min1,max1) = bnds1
-
         numV = numVals kv1
-
-        bnds' = liftM2 (,) min' max'
-
-        getBound f = fmap fst . V.find (isJust . snd) . f
-                     . V.slice min1 (max 0 $ max1-min1+1)
-                     $ V.indexed tbl'
-
-        min' | numV == numDel         = Nothing
-             | min1 < minS            = Just min1
-             | isJust $ tbl' V.! min1 = Just min1
-             | otherwise              = getBound id
-
-        max' | numV == numDel         = Nothing
-             | max1 > maxS            = Just max1
-             | isJust $ tbl' V.! max1 = Just max1
-             | otherwise              = getBound V.reverse
-
-    rap = uncurry (***)
 
 mapKV      :: (a -> b) -> KeylessVector a -> KeylessVector b
 mapKV f kv = kv { table = V.map (fmap f) $ table kv }
