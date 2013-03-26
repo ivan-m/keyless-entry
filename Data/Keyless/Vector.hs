@@ -12,7 +12,9 @@ module Data.Keyless.Vector where
 import Prelude hiding (lookup, map)
 
 import Data.Keyless
-import Data.Maybe(isNothing, isJust, catMaybes, fromMaybe)
+import Data.Maybe(isNothing, isJust, fromMaybe, fromJust)
+import Data.Monoid(mconcat)
+import Data.Ord(comparing)
 import qualified Data.Vector as V
 import qualified Data.Vector.Mutable as MV
 import Control.Monad(liftM2, forM_)
@@ -35,10 +37,20 @@ data KeylessVector a = KV { table      :: !(V.Vector (Maybe a))
                           -- Invariant: numVals >= 0; numVals == 0 iff bounds == Nothing
                           , numVals    :: {-# UNPACK #-} !Int
                           }
-                     deriving (Eq, Ord, Show, Read)
+                     deriving (Show, Read)
 
--- We need c more values; increase if necessary or return original
--- vector.
+instance (Eq a) => Eq (KeylessVector a) where
+  (KV c1 k1 v1) == (KV c2 k2 v2) = v1 == v2
+                                   && k1 == k2
+                                   && getVals c1 == getVals c2
+    where
+      getVals = V.filter (isJust . snd) . V.indexed
+
+instance (Ord a) => Ord (KeylessVector a) where
+  compare = mconcat [ comparing numVals
+                    , comparing nextKey
+                    , comparing $ V.filter (isJust . snd) . V.indexed . table
+                    ]
 
 instance Functor KeylessVector where
   fmap = mapKV
