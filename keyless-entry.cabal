@@ -13,7 +13,7 @@ cabal-version:       >=1.8
 
 library
   exposed-modules:       Data.Keyless
-                       , Data.Keyless.Vector.Mutable
+                       , Data.Keyless.Vector
                        , Data.Keyless.Map.Lazy
                        , Data.Keyless.IntMap.Lazy
   -- other-modules:
