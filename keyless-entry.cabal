@@ -17,7 +17,7 @@ library
                        , Data.Keyless.Map.Lazy
                        , Data.Keyless.IntMap.Lazy
   -- other-modules:
-  build-depends:         base >=4.6 && < 5,
+  build-depends:         base >=4.6 && < 5
                        , vector ==0.10.*
                        , containers >=0.5 && < 6
                        , deepseq == 1.3.*
