@@ -118,7 +118,7 @@ differenceKM :: KeylessMap a -> KeylessMap a
 differenceKM km1 km2 = km1 { table = table km1 `M.difference` table km2 }
 
 mapKM   :: (a -> b) -> KeylessMap a -> KeylessMap b
-mapKM f = fmap f
+mapKM f km = km { table = fmap f $ table km }
 
 mapWithKeyKM     :: (Key -> a -> b) -> KeylessMap a
                     -> KeylessMap b
