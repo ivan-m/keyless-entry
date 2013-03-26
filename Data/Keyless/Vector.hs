@@ -69,17 +69,19 @@ checkSize c k v
     needLen = c + k
     len = V.length v
     -- Wanting length to always be 2^n * startSize
-    len' = (*) len . (^) (2::Int) . (`asTypeOf`(undefined::Int))
+    len' = (*) len . (^) growthFactor . (`asTypeOf`(undefined::Int))
            . ceiling . logBase (2::Double)
            $ fromIntegral needLen / fromIntegral len
     missingLen = len' - len
+
+-- How much we should increase a Vector upon re-sizing.
+growthFactor :: Int
+growthFactor = 2
 
 boundCheck :: r -> Key -> KeylessVector a -> r -> r
 boundCheck fl k kv act
   | k < initKey || k >= V.length (table kv) = fl
   | otherwise                               = act
-
--- By default, use doubling for vector size.
 
 startSize :: Int
 startSize = 10
