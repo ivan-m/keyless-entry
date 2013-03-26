@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections, MonadComprehensions #-}
 {- |
    Module      : Data.Keyless.Vector
    Description : Lazy Map-based lookup tables.
@@ -123,6 +123,24 @@ insertKV a kv = (k, kv')
              , numVals = numVals kv + 1
              }
 
+insertBulkKV :: [a] -> KeylessVector a -> ([Key], KeylessVector a)
+insertBulkKV as kv = (ks, kv')
+  where
+    len = length as
+    k = nextKey kv
+    k' = k + len
+    lastK = k' - 1
+    ks = [k..lastK]
+
+    kas = zip ks $ fmap Just as
+    v' = V.modify (\mv -> mapM_ (uncurry $ MV.write mv) kas)
+         . checkSize len k $ table kv
+
+    kv' = kv { table = v'
+             , nextKey = k'
+             , numVals = numVals kv + len
+             }
+
 -- Need to read first to see if the numVal count should be adjusted.
 deleteKV :: Key -> KeylessVector a -> KeylessVector a
 deleteKV k kv
@@ -138,6 +156,21 @@ deleteKV k kv
     ma = tbl V.! k
 
     tbl' = V.modify (\mv -> MV.write mv k Nothing) tbl
+
+deleteBulkKV :: [Key] -> KeylessVector a -> KeylessVector a
+deleteBulkKV ks kv
+  | numVals kv == 0 = kv
+  | V.null ks'      = kv
+  | otherwise       = kv { table = tbl'
+                         , numVals = numVals kv - numDel
+                         }
+  where
+    tbl = table kv
+    nk = nextKey kv
+    ks' = V.fromList $ filter (\k -> k >= initKey && k < nk) ks
+
+    numDel = V.length . V.findIndices isJust $ V.unsafeBackpermute tbl ks'
+    tbl' = V.modify (\mv -> V.forM_ ks' $ \ k -> MV.write mv k Nothing) tbl
 
 lookupKV :: Key -> KeylessVector a -> Maybe a
 lookupKV k kv = boundCheck Nothing k kv $ table kv V.! k
@@ -240,6 +273,35 @@ mergeKV kv1 kv2 = (kf,) $ KV { table   = tbl
     len2 = n2 -- The "effective" length of kv2
     kf = (+n1)
 
+mergeAllKV     :: [KeylessVector a] -> ([MergeTranslation Key], KeylessVector a)
+mergeAllKV []  = ([], initKV)
+mergeAllKV kvs = (mts, KV { table = tbl, nextKey = nk, numVals = nv })
+  where
+    lens = nextKey <$> kvs
+    totLen = sum lens
+    offsets = scanl (+) 0 $ init lens
+    toMrg = zip3 offsets lens $ fmap table kvs
+
+    nv = sum $ fmap numVals kvs
+
+    fs = (+) <$> offsets
+
+    mts = zipWith toMT fs lens
+
+    toMT f nxtKey = MT { newBounds = [ (f initKey, f $ pred nxtKey)
+                                       | nxtKey > initKey
+                                     ]
+                       , oldToNew = f
+                       }
+
+    nk = last $ zipWith ($) fs lens
+
+    tbl = V.create $ do
+      mv <- MV.new totLen
+      forM_ toMrg $ \ (off,len,vec) ->
+        V.unsafeCopy (MV.slice off len mv) (V.slice initKey len vec)
+      return mv
+
 differenceKV :: KeylessVector a -> KeylessVector a -> KeylessVector a
 differenceKV kv1 kv2
   | isNull kv1 = kv1 -- Nothing to delete!
@@ -279,8 +341,14 @@ instance Keyless KeylessVector where
   insert = insertKV
   {-# INLINE insert #-}
 
+  insertBulk = insertBulkKV
+  {-# INLINE insertBulk #-}
+
   delete = deleteKV
   {-# INLINE delete #-}
+
+  deleteBulk = deleteBulkKV
+  {-# INLINE deleteBulk #-}
 
   lookup = lookupKV
   {-# INLINE lookup #-}
@@ -323,6 +391,9 @@ instance Keyless KeylessVector where
 
   merge = mergeKV
   {-# INLINE merge #-}
+
+  mergeAll = mergeAllKV
+  {-# INLINE mergeAll #-}
 
   difference = differenceKV
   {-# INLINE difference #-}

@@ -1,3 +1,4 @@
+{-# LANGUAGE MonadComprehensions #-}
 {- |
    Module      : Data.Keyless.IntMap.Lazy
    Description : Lazy IntMap-based lookup tables.
@@ -96,6 +97,24 @@ mergeKM (KM tbl1 n1) (KM tbl2 n2) = (kf, KM tbl nxt)
     tbl = M.union tbl1 tbl2'
     nxt = kf n2
 
+mergeAllKM :: [KeylessIntMap a] -> ([MergeTranslation Key], KeylessIntMap a)
+mergeAllKM []  = ([], initKM)
+mergeAllKM kvs = (mts, KM { table = tbl, nextKey = nk })
+  where
+    szs = fmap nextKey kvs
+    fs = fmap (+) . scanl (+) 0 $ init szs
+    tbl = M.unions . zipWith M.mapKeysMonotonic fs $ fmap table kvs
+
+    mts = zipWith toMT fs szs
+
+    toMT f nxtKey = MT { newBounds = [ (f initKey, f $ pred nxtKey)
+                                       | nxtKey > initKey
+                                     ]
+                       , oldToNew = f
+                       }
+
+    nk = last $ zipWith ($) fs szs
+
 differenceKM :: KeylessIntMap a -> KeylessIntMap a
                 -> KeylessIntMap a
 differenceKM km1 km2 = km1 { table = table km1 `M.difference` table km2 }
@@ -161,6 +180,9 @@ instance Keyless KeylessIntMap where
 
   merge = mergeKM
   {-# INLINE merge #-}
+
+  mergeAll = mergeAllKM
+  {-# INLINE mergeAll #-}
 
   difference = differenceKM
   {-# INLINE difference #-}

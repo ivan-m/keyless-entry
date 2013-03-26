@@ -12,7 +12,10 @@ lookup table/dictionary but the type/value of the key isn't important.
 module Data.Keyless where
 
 import Prelude hiding (lookup, map)
+import Data.List(foldl', mapAccumL)
 import Data.Maybe(isJust, fromMaybe)
+import Data.Tuple(swap)
+import Control.Arrow(first)
 
 -- -----------------------------------------------------------------------------
 
@@ -39,9 +42,17 @@ class (Functor c) => Keyless c where
   -- | Insert the provided value into the table
   insert :: a -> c a -> (Key, c a)
 
+  -- | Add multiple values into the table.
+  insertBulk :: [a] -> c a -> ([Key], c a)
+  insertBulk as c = swap $ mapAccumL ((swap .) . flip insert) c as
+
   -- | Remove the specified entry from the table.  Won't do anything
   --   if the key is not in the table.
   delete :: Key -> c a -> c a
+
+  -- | Remove multiple entries from the table.
+  deleteBulk :: [Key] -> c a -> c a
+  deleteBulk ks c = foldr delete c ks
 
   -- | Return the value associated with the specified key if it is in
   --   the table.
@@ -105,6 +116,13 @@ class (Functor c) => Keyless c where
   --   between keys from the second table to the first.
   merge :: c a -> c a -> ((Key -> Key), c a)
 
+  -- | Given a non-empty list of tables, merge them all together in
+  --   order and provide the translation function for each (the first
+  --   function will be @'id'@).
+  --
+  --   An empty list will return the 'empty' table.
+  mergeAll :: [c a] -> ([MergeTranslation Key], c a)
+
   -- | Remove any keys present in the second table from the first.
   difference :: c a -> c a -> c a
 
@@ -128,3 +146,23 @@ c ! k = unsafeLookup k c
 -- | A flipped, infix alias for 'lookup'.
 (!?) :: (Keyless c) => c a -> Key -> Maybe a
 c !? a = lookup a c
+
+
+-- | When merging multiple 'Keyless' tables together, to be able to
+--   translate values from each original table to the new values and
+--   positions several pieces of information are needed:
+--
+--   * The keys in the new table that corresponds to the original;
+--     this is the keys bounded by 'newBounds' inclusive.  Bounds of
+--     'Nothing' denote that the original table was 'null'.
+--
+--   * The /partial/ function in 'oldToNew' translates keys from the
+--     old table to keys in the new table.
+data MergeTranslation k = MT { -- | The portion of the new table from
+                               --   the applicable old table.
+                               newBounds :: !(Maybe (Key,Key))
+                               -- | The translation function for keys
+                               --   from the original table to the new
+                               --   one.
+                             , oldToNew  :: !(k -> k)
+                             }
