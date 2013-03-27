@@ -206,7 +206,8 @@ maxKeyKV kv = fmap fst . findR (isJust . snd)
 findR :: (a -> Bool) -> V.Vector a -> Maybe a
 findR p = VS.find p . VG.streamR
 
--- Use default for isNull; other option is to see if bounds are Nothing.
+isNullKV :: KeylessVector a -> Bool
+isNullKV = (0==) . numVals
 
 keysKV :: KeylessVector a -> [Key]
 keysKV kv = V.toList . V.findIndices isJust
@@ -371,8 +372,8 @@ instance Keyless KeylessVector where
   maxKey = maxKeyKV
   {-# INLINE maxKey #-}
 
-  -- isNull = isNullKV
-  -- {-# INLINE isNull #-}
+  isNull = isNullKV
+  {-# INLINE isNull #-}
 
   keys = keysKV
   {-# INLINE keys #-}

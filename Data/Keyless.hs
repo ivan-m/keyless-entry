@@ -12,10 +12,6 @@ lookup table/dictionary but the type/value of the key isn't important.
 module Data.Keyless where
 
 import Prelude hiding (lookup, map)
-import Data.List(foldl', mapAccumL)
-import Data.Maybe(isJust, fromMaybe)
-import Data.Tuple(swap)
-import Control.Arrow(first)
 
 -- -----------------------------------------------------------------------------
 
@@ -44,7 +40,6 @@ class (Functor c) => Keyless c where
 
   -- | Add multiple values into the table.
   insertBulk :: [a] -> c a -> ([Key], c a)
-  insertBulk as c = swap $ mapAccumL ((swap .) . flip insert) c as
 
   -- | Remove the specified entry from the table.  Won't do anything
   --   if the key is not in the table.
@@ -52,7 +47,6 @@ class (Functor c) => Keyless c where
 
   -- | Remove multiple entries from the table.
   deleteBulk :: [Key] -> c a -> c a
-  deleteBulk ks c = foldr delete c ks
 
   -- | Return the value associated with the specified key if it is in
   --   the table.
@@ -60,13 +54,9 @@ class (Functor c) => Keyless c where
 
   -- | As with 'lookup', but assumes the key is in the table.
   unsafeLookup   :: Key -> c a -> a
-  unsafeLookup k = fromMaybe err . lookup k
-    where
-      err = error $ "The key `" ++ show k ++ "' does not have a corresponding value."
 
   -- | Is the following entry in the table?
   hasEntry   :: Key -> c a -> Bool
-  hasEntry k = isJust . lookup k
 
   -- | Apply a function on the value associated with the specified key.
   adjust :: (a -> a) -> Key -> c a -> (c a)
@@ -84,15 +74,12 @@ class (Functor c) => Keyless c where
 
   -- | Are there any values being stored?
   isNull :: c a -> Bool
-  isNull = (0==) . size
 
   -- | Return all keys in the table.
   keys :: c a -> [Key]
-  keys = fmap fst . assocs
 
   -- | Return all values in the table.
   values :: c a -> [a]
-  values = fmap snd . assocs
 
   -- | Return all @(key,value)@ pairs in the table.
   assocs :: c a -> [(Key, a)]
@@ -100,7 +87,6 @@ class (Functor c) => Keyless c where
   -- | Create a table from a list of specified values.  The value at
   --   @xs !! k@ will be associated with the key @k@ in @fromList xs@.
   fromList :: [a] -> c a
-  fromList = unsafeFromListWithKeys . zip [initKey..]
 
   -- | Create a table from the specified @(key,value)@ pairs (this is
   --   the inverse of @assocs@).

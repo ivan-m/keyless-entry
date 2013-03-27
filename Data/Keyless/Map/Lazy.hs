@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MonadComprehensions #-}
 {- |
    Module      : Data.Keyless.Map.Lazy
@@ -37,8 +38,21 @@ insertKM v (KM tbl k) = (k, KM tbl' k')
     k' = succ k
     tbl' = M.insert k v tbl
 
+insertBulkKM :: [a] -> KeylessMap a -> ([Key], KeylessMap a)
+insertBulkKM as (KM tbl nk) = (ks, KM tbl' $ nk + sz')
+  where
+    kas = M.fromAscList $ zip [nk..] as
+    sz' = M.size kas
+    ks = M.keys kas
+    tbl' = tbl `M.union` kas
+
 deleteKM      :: Key -> KeylessMap a -> KeylessMap a
 deleteKM k km = km { table = M.delete k $ table km }
+
+deleteBulkKM :: [Key] -> KeylessMap a -> KeylessMap a
+deleteBulkKM ks km = km { table = table km `M.difference` ks' }
+  where
+    ks' = M.fromList $ fmap (,()) ks
 
 lookupKM   :: Key -> KeylessMap a -> Maybe a
 lookupKM k = M.lookup k . table
@@ -134,8 +148,14 @@ instance Keyless KeylessMap where
   insert = insertKM
   {-# INLINE insert #-}
 
+  insertBulk = insertBulkKM
+  {-# INLINE insertBulk #-}
+
   delete = deleteKM
   {-# INLINE delete #-}
+
+  deleteBulk = deleteBulkKM
+  {-# INLINE deleteBulk #-}
 
   lookup = lookupKM
   {-# INLINE lookup #-}

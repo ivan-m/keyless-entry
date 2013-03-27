@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MonadComprehensions #-}
 {- |
    Module      : Data.Keyless.IntMap.Lazy
@@ -13,8 +14,6 @@ import Prelude hiding (lookup, map)
 import Data.Keyless
 import qualified Data.IntMap.Lazy as M
 import Control.DeepSeq(NFData(..))
-
--- Size is O(n) rather than O(1) as with Map
 
 -- -----------------------------------------------------------------------------
 
@@ -39,8 +38,21 @@ insertKM v (KM tbl k) = (k, KM tbl' k')
     k' = succ k
     tbl' = M.insert k v tbl
 
+insertBulkKM :: [a] -> KeylessIntMap a -> ([Key], KeylessIntMap a)
+insertBulkKM as (KM tbl nk) = (ks, KM tbl' $ nk + sz')
+  where
+    kas = M.fromAscList $ zip [nk..] as
+    sz' = M.size kas
+    ks = M.keys kas
+    tbl' = tbl `M.union` kas
+
 deleteKM      :: Key -> KeylessIntMap a -> KeylessIntMap a
 deleteKM k km = km { table = M.delete k $ table km }
+
+deleteBulkKM :: [Key] -> KeylessIntMap a -> KeylessIntMap a
+deleteBulkKM ks km = km { table = table km `M.difference` ks' }
+  where
+    ks' = M.fromList $ fmap (,()) ks
 
 lookupKM   :: Key -> KeylessIntMap a -> Maybe a
 lookupKM k = M.lookup k . table
@@ -63,7 +75,7 @@ minKeyKM = fmap (fst . fst) . M.minViewWithKey . table
 maxKeyKM :: KeylessIntMap a -> Maybe Key
 maxKeyKM = fmap (fst . fst) . M.maxViewWithKey . table
 
--- Can use this for Map as we only store values we want.
+-- Can use this for IntMap as we only store values we want.
 isNullKM :: KeylessIntMap a -> Bool
 isNullKM = M.null . table
 
@@ -119,7 +131,7 @@ differenceKM :: KeylessIntMap a -> KeylessIntMap a
                 -> KeylessIntMap a
 differenceKM km1 km2 = km1 { table = table km1 `M.difference` table km2 }
 
-mapKM      :: (a -> b) -> KeylessIntMap a -> KeylessIntMap b
+mapKM   :: (a -> b) -> KeylessIntMap a -> KeylessIntMap b
 mapKM f km = km { table = fmap f $ table km }
 
 mapWithKeyKM     :: (Key -> a -> b) -> KeylessIntMap a
@@ -136,8 +148,14 @@ instance Keyless KeylessIntMap where
   insert = insertKM
   {-# INLINE insert #-}
 
+  insertBulk = insertBulkKM
+  {-# INLINE insertBulk #-}
+
   delete = deleteKM
   {-# INLINE delete #-}
+
+  deleteBulk = deleteBulkKM
+  {-# INLINE deleteBulk #-}
 
   lookup = lookupKM
   {-# INLINE lookup #-}
