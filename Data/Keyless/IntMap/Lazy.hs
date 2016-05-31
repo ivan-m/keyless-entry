@@ -1,5 +1,6 @@
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE MonadComprehensions #-}
+{-# LANGUAGE FlexibleInstances, MonadComprehensions, MultiParamTypeClasses,
+             TupleSections, TypeFamilies #-}
+
 {- |
    Module      : Data.Keyless.IntMap.Lazy
    Description : Lazy IntMap-based lookup tables.
@@ -8,12 +9,12 @@
    Maintainer  : Ivan.Miljenovic@gmail.com
 
 -}
-module Data.Keyless.IntMap.Lazy where
+module Data.Keyless.IntMap.Lazy (KeylessIntMap) where
 
-import Prelude hiding (lookup, map)
-import Data.Keyless
+import           Control.DeepSeq  (NFData (..))
 import qualified Data.IntMap.Lazy as M
-import Control.DeepSeq(NFData(..))
+import           Data.Keyless
+import           Prelude          hiding (lookup, map)
 
 -- -----------------------------------------------------------------------------
 
@@ -140,7 +141,9 @@ mapWithKeyKM f km = km { table = M.mapWithKey f $ table km }
 
 -- -----------------------------------------------------------------------------
 
-instance Keyless KeylessIntMap where
+instance Keyless (KeylessIntMap a) where
+
+  type Elem (KeylessIntMap a) = a
 
   empty = initKM
   {-# INLINE empty #-}
@@ -204,6 +207,8 @@ instance Keyless KeylessIntMap where
 
   difference = differenceKM
   {-# INLINE difference #-}
+
+instance FKeyless KeylessIntMap a where
 
   mapWithKey = mapWithKeyKM
   {-# INLINE mapWithKey #-}

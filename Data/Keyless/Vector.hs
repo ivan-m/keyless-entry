@@ -1,4 +1,6 @@
-{-# LANGUAGE TupleSections, MonadComprehensions #-}
+{-# LANGUAGE DataKinds, FlexibleInstances, MonadComprehensions,
+             MultiParamTypeClasses, TupleSections, TypeFamilies #-}
+
 {- |
    Module      : Data.Keyless.Vector
    Description : Lazy Map-based lookup tables.
@@ -7,21 +9,22 @@
    Maintainer  : Ivan.Miljenovic@gmail.com
 
 -}
-module Data.Keyless.Vector where
+module Data.Keyless.Vector (KeylessVector) where
 
 import Prelude hiding (lookup, map)
 
-import Data.Keyless
-import Data.Maybe(isNothing, isJust, fromMaybe, fromJust)
-import Data.Monoid(mconcat)
-import Data.Ord(comparing)
-import qualified Data.Vector as V
-import qualified Data.Vector.Mutable as MV
-import qualified Data.Vector.Generic as VG
-import qualified Data.Vector.Fusion.Stream as VS
-import Control.Applicative((<$>))
-import Control.Monad(forM_)
-import Control.DeepSeq(NFData(..))
+import           Control.Applicative       ((<$>))
+import           Control.DeepSeq           (NFData (..))
+import           Control.Monad             (forM_)
+import           Data.Keyless
+import           Data.Maybe                (catMaybes, fromMaybe, isJust,
+                                            isNothing)
+import           Data.Monoid               (mconcat)
+import           Data.Ord                  (comparing)
+import qualified Data.Vector               as V
+import qualified Data.Vector.Fusion.Bundle as VB
+import qualified Data.Vector.Generic       as VG
+import qualified Data.Vector.Mutable       as MV
 
 -- -----------------------------------------------------------------------------
 
@@ -31,12 +34,18 @@ import Control.DeepSeq(NFData(..))
 -- Using Set would give us log complexity back; another Vector would
 -- take O(l) for getting all keys...
 
-data KeylessVector a = KV { table      :: !(V.Vector (Maybe a))
-                          , nextKey    :: {-# UNPACK #-} !Key
-                          , numVals    :: {-# UNPACK #-} !Int
+data KeylessVector a = KV { table   :: {-# UNPACK #-} !(V.Vector (Maybe a))
+                          , nextKey :: {-# UNPACK #-} !Key
+                          , numVals :: {-# UNPACK #-} !Int
                           }
                      deriving (Show, Read)
 
+-- Should this check/care about the value of 'nextKey'?
+--
+-- Two possibilities:
+--
+--   * Eq on construction, so same keys added/deleted in order
+--   * Same contents in order
 instance (Eq a) => Eq (KeylessVector a) where
   (KV c1 k1 v1) == (KV c2 k2 v2) = v1 == v2
                                    && k1 == k2
@@ -83,9 +92,6 @@ boundCheck fl k kv act
   | k < initKey || k >= V.length (table kv) = fl
   | otherwise                               = act
 
-startSize :: Int
-startSize = 10
-
 -- | Create an empty 'KeylessVector' of the specified initial
 --   starting size rather than the default of @10@.
 --
@@ -104,9 +110,6 @@ emptySizedBase len = KV { table = V.replicate len Nothing
                         }
 
 -- -----------------------------------------------------------------------------
-
-initKV :: KeylessVector a
-initKV = initSized startSize
 
 insertKV :: a -> KeylessVector a -> (Key, KeylessVector a)
 insertKV a kv = (k, kv')
@@ -200,41 +203,40 @@ minKeyKV :: KeylessVector a -> Maybe Key
 minKeyKV = V.findIndex isJust . table
 
 maxKeyKV :: KeylessVector a -> Maybe Key
-maxKeyKV kv = fmap fst . findR (isJust . snd)
-              . V.indexed . V.unsafeSlice initKey (nextKey kv) $ table kv
+maxKeyKV = fmap fst . findR (isJust . snd) . V.indexed . usedSlice
 
 findR :: (a -> Bool) -> V.Vector a -> Maybe a
-findR p = VS.find p . VG.streamR
+findR p = VB.find p . VG.streamR
+
+usedSlice :: KeylessVector a -> V.Vector (Maybe a)
+usedSlice kv = V.unsafeSlice initKey (nextKey kv) $ table kv
 
 isNullKV :: KeylessVector a -> Bool
 isNullKV = (0==) . numVals
 
 keysKV :: KeylessVector a -> [Key]
-keysKV kv = V.toList . V.findIndices isJust
-            . V.unsafeSlice initKey (nextKey kv) $ table kv
+keysKV = V.toList . V.findIndices isJust . usedSlice
 
 valuesKV :: KeylessVector a -> [a]
-valuesKV kv = V.toList . V.map fromJust . V.filter isJust
-              . V.unsafeSlice initKey (nextKey kv) $ table kv
+valuesKV = catMaybes . V.toList . usedSlice
 
 assocsKV :: KeylessVector a -> [(Key, a)]
-assocsKV kv = V.toList . V.map fromJust . V.filter isJust . V.imap (fmap . (,))
-              . V.unsafeSlice initKey (nextKey kv) $ table kv
+assocsKV = catMaybes . V.toList . V.imap (fmap . (,)) . usedSlice
 
-fromListKV :: [a] -> KeylessVector a
-fromListKV xs
-  | null xs   = initKV
+fromListKV :: Int -> [a] -> KeylessVector a
+fromListKV sz xs
+  | null xs   = initSized sz
   | otherwise = KV { table     = tbl
                    , nextKey   = len
                    , numVals   = len
                    }
   where
     tbl = V.fromList $ fmap Just xs
-    len = V.length tbl
+    len = max sz (V.length tbl)
 
-unsafeFromListWithKeysKV :: [(Key,a)] -> KeylessVector a
-unsafeFromListWithKeysKV kxs
-  | null kxs  = initKV
+unsafeFromListWithKeysKV :: Int -> [(Key,a)] -> KeylessVector a
+unsafeFromListWithKeysKV sz kxs
+  | null kxs  = initSized sz
   | otherwise = KV { table = tbl
                    , nextKey = len
                    , numVals = cnt
@@ -244,7 +246,7 @@ unsafeFromListWithKeysKV kxs
 
     maxK = maximum ks
 
-    len = maxK + 1
+    len = max sz (maxK + 1)
 
     cnt = length kxs
 
@@ -275,7 +277,8 @@ mergeKV kv1 kv2 = (kf,) $ KV { table   = tbl
     kf = (+n1)
 
 mergeAllKV     :: [KeylessVector a] -> ([MergeTranslation Key], KeylessVector a)
-mergeAllKV []  = ([], initKV)
+mergeAllKV []  = ([], initSized 10) -- Need some arbitrary size here
+                                    -- just to make it happy.
 mergeAllKV kvs = (mts, KV { table = tbl, nextKey = nk, numVals = nv })
   where
     lens = nextKey <$> kvs
@@ -331,13 +334,14 @@ mapKV f kv = kv { table = V.map (fmap f) $ table kv }
 mapWithKeyKV      :: (Key -> a -> b) -> KeylessVector a -> KeylessVector b
 mapWithKeyKV f kv = kv { table = V.imap (fmap . f) $ table kv }
 
-instance Keyless KeylessVector where
+instance Keyless (KeylessVector a) where
 
-  empty = initKV
+  type Elem (KeylessVector a) = a
+
+  type BuildArgs (KeylessVector a) = '[Int]
+
+  empty = initSized
   {-# INLINE empty #-}
-
-  emptySized = initSized
-  {-# INLINE emptySized #-}
 
   insert = insertKV
   {-# INLINE insert #-}
@@ -398,6 +402,8 @@ instance Keyless KeylessVector where
 
   difference = differenceKV
   {-# INLINE difference #-}
+
+instance FKeyless KeylessVector a where
 
   mapWithKey = mapWithKeyKV
   {-# INLINE mapWithKey #-}
